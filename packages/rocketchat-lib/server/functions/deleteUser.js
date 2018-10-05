@@ -1,12 +1,22 @@
+function setNewLastOwner(userId, roomData) {
+	const rocketCat = RocketChat.models.Users.findOneById('rocket.cat');
+	if (rocketCat != null) {
+		if (!RocketChat.models.Subscriptions.findOneByRoomIdAndUserId(roomData.rid, rocketCat._id)) {
+			Meteor.call('addUserToRoom', { rid: roomData.rid, username: rocketCat.username });
+		}
+		Meteor.call('addRoomOwner', roomData.rid, rocketCat._id);
+		Meteor.call('removeRoomOwner', roomData.rid, userId);
+	}
+}
+
 RocketChat.deleteUser = function(userId) {
 	const user = RocketChat.models.Users.findOneById(userId, {
 		fields: { username: 1, avatarOrigin: 1 },
 	});
 
 	// Users without username can't do anything, so there is nothing to remove
+	const roomCache = [];
 	if (user.username != null) {
-		const roomCache = [];
-
 		// Iterate through all the rooms the user is subscribed to, to check if they are the last owner of any of them.
 		RocketChat.models.Subscriptions.db.findByUserId(userId).forEach((subscription) => {
 			const roomData = {
@@ -23,21 +33,28 @@ RocketChat.deleteUser = function(userId) {
 					const numOwners = RocketChat.authz.getUsersInRole('owner', subscription.rid).fetch().length;
 					// If it's only one, then this user is the only owner.
 					if (numOwners === 1) {
-						// If the user is the last owner of a public channel, then we need to abort the deletion
-						if (roomData.t === 'c') {
-							throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
-								method: 'deleteUser',
-							});
+						roomData.subscribers = RocketChat.models.Subscriptions.findByRoomId(subscription.rid).count();
+						if ((roomData.t === 'c' || roomData.t === 'p') && roomData.subscribers === 1) {
+							// SG: TODO: only call the following func if setting is enabled.
+							setNewLastOwner(userId, roomData);
 						}
+
+						// SG: TODO: bypass if setting is enabled.
+						// // If the user is the last owner of a public channel, then we need to abort the deletion
+						// if (roomData.t === 'c') {
+						// 	throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
+						// 		method: 'deleteUser',
+						// 	});
+						// }
 
 						// For private groups, let's check how many subscribers it has. If the user is the only subscriber, then it will be eliminated and doesn't need to abort the deletion
-						roomData.subscribers = RocketChat.models.Subscriptions.findByRoomId(subscription.rid).count();
 
-						if (roomData.subscribers > 1) {
-							throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
-								method: 'deleteUser',
-							});
-						}
+
+						// if (roomData.subscribers > 1) {
+						// 	throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
+						// 		method: 'deleteUser',
+						// 	});
+						// }
 					}
 				}
 			}
