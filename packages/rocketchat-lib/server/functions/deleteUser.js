@@ -34,7 +34,8 @@ RocketChat.deleteUser = function(userId) {
 					// If it's only one, then this user is the only owner.
 					if (numOwners === 1) {
 						roomData.subscribers = RocketChat.models.Subscriptions.findByRoomId(subscription.rid).count();
-						if ((roomData.t === 'c' || roomData.t === 'p') && roomData.subscribers === 1) {
+						// if ((roomData.t === 'c' || roomData.t === 'p') && roomData.subscribers === 1) {
+						if ((roomData.t === 'c' || roomData.t === 'p')) {
 							// SG: TODO: only call the following func if setting is enabled.
 							setNewLastOwner(userId, roomData);
 						}

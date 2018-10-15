@@ -987,6 +987,14 @@ describe('[Users]', function() {
 	});
 
 	describe('[/users.delete]', () => {
+		const testUsername = `testuser${ +new Date() }`;
+		const testUsername2 = `testuser2${ +new Date() }`;
+		let targetUser;
+		let user2;
+		let publicChannel;
+		let privateChannel;
+		let executeBeforeEach = true;
+
 		const updatePermission = (permission, roles) => new Promise((resolve) => {
 			request.post(api('permissions.update'))
 				.set(credentials)
@@ -998,24 +1006,112 @@ describe('[Users]', function() {
 				})
 				.end(resolve);
 		});
-		const testUsername = `testuser${ +new Date() }`;
-		let targetUser;
-		it('register a new user...', (done) => {
+
+		const createUser = (email, username, name, pass) => new Promise((resolve) => {
 			request.post(api('users.register'))
 				.set(credentials)
 				.send({
-					email: `${ testUsername }.@teste.com`,
-					username: `${ testUsername }test`,
-					name: testUsername,
-					pass: password,
+					email: `${ email }`,
+					username: `${ username }`,
+					name: `${ name }`,
+					pass: `${ pass }`,
 				})
 				.expect('Content-Type', 'application/json')
 				.expect(200)
 				.expect((res) => {
-					targetUser = res.body.user;
+					resolve(res.body.user);
+				})
+				.end(resolve);
+		});
+
+		before(async(done) => {
+			const createPublicChannel = await request.post(api('channels.create'))
+				.set(credentials)
+				.send({
+					name: `testChannel${ +new Date() }`,
+				});
+
+			request.post(api('groups.create'))
+				.set(credentials)
+				.send({
+					name: `testPrivateChannel${ +new Date() }`,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(createPublicChannel.body).to.have.property('success', true);
+					expect(res.body).to.have.property('success', true);
+					publicChannel = createPublicChannel.body.channel;
+					privateChannel = res.body.group;
 				})
 				.end(done);
 		});
+
+		beforeEach(async(done) => {
+			if (executeBeforeEach) {
+				await createUser(`${ testUsername }.@teste.com`, `${ testUsername }test`, testUsername, password).then((resolve) => {
+					targetUser = resolve;
+				});
+				await createUser(`${ testUsername2 }.@teste.com`, `${ testUsername2 }test`, testUsername2, password).then((resolve) => {
+					user2 = resolve;
+				});
+			} else {
+				executeBeforeEach = true;
+			}
+
+			done();
+		});
+
+		afterEach(async(done) => {
+			if (executeBeforeEach) {
+				await updatePermission('delete-user', ['admin']);
+
+				if (targetUser != null && user2 != null) {
+					const deleteTargetUser = await request.post(api('users.delete')).set(credentials).send({
+						userId: targetUser._id,
+					});
+					request.post(api('users.delete')).set(credentials)
+						.send({
+							userId: user2._id,
+						})
+						.expect('Content-Type', 'application/json')
+						.expect(200)
+						.expect((res) => {
+							expect(deleteTargetUser.body).to.have.property('success', true);
+							expect(res.body).to.have.property('success', true);
+						})
+						.end(done);
+				} else if (targetUser != null || user2 != null) {
+					let deleteTargetUser;
+					if (targetUser != null) {
+						deleteTargetUser = await request.post(api('users.delete')).set(credentials)
+							.send({
+								userId: targetUser._id,
+							});
+					}
+					if (user2 != null) {
+						request.post(api('users.delete')).set(credentials)
+							.send({
+								userId: user2._id,
+							})
+							.expect('Content-Type', 'application/json')
+							.expect(200)
+							.expect((res) => {
+								if (deleteTargetUser != null) {
+									expect(deleteTargetUser.body).to.have.property('success', true);
+								}
+								expect(res.body).to.have.property('success', true);
+							})
+							.end(done);
+					}
+				} else {
+					done();
+				}
+			} else {
+				done();
+			}
+		});
+
 		it('should return an error when trying delete user account without "delete-user" permission', (done) => {
 			updatePermission('delete-user', ['user'])
 				.then(() => {
@@ -1033,6 +1129,7 @@ describe('[Users]', function() {
 						.end(done);
 				});
 		});
+
 		it('should delete user account when logged user has "delete-user" permission', (done) => {
 			updatePermission('delete-user', ['admin'])
 				.then(() => {
@@ -1045,9 +1142,260 @@ describe('[Users]', function() {
 						.expect(200)
 						.expect((res) => {
 							expect(res.body).to.have.property('success', true);
+							targetUser = null;
 						})
 						.end(done);
 				});
+		});
+
+		it('should delete user account and his channel when user is the last owner of at least one channel and is alone', async(done) => {
+			const channelInvite = await request.post(api('channels.invite'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+					userId: targetUser._id,
+				});
+
+			const channelAddOwner = await request.post(api('channels.addOwner'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+					userId: targetUser._id,
+				});
+
+			const deleteChannel = await request.post(api('channels.delete'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+				});
+
+			request.post(api('users.delete'))
+				.set(credentials)
+				.send({
+					userId: targetUser._id,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(channelInvite.body).to.have.property('success', true);
+					expect(channelAddOwner.body).to.have.property('success', true);
+					expect(deleteChannel.body).to.have.property('success', true);
+					expect(res.body).to.have.property('success', true);
+					targetUser = null;
+				})
+				.end(done);
+		});
+
+		it('create new channel: publicChannel', (done) => {
+			executeBeforeEach = false;
+			request.post(api('channels.create'))
+				.set(credentials)
+				.send({
+					name: `testChannel${ +new Date() }`,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(res.body).to.have.property('success', true);
+				})
+				.end((err, res) => {
+					publicChannel = res.body.channel;
+					done();
+				});
+		});
+
+		it('should delete user account and set rocket.cat user to the new owner in the channel when user is the last owner of at least one channel and is not alone', async(done) => {
+			const channelInvite1 = await request.post(api('channels.invite'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+					userId: targetUser._id,
+				});
+
+			const channelInvite2 = await request.post(api('channels.invite'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+					userId: user2._id,
+				});
+
+			const channelInviteRocketCat = await request.post(api('channels.invite'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+					userId: 'rocket.cat',
+				});
+
+			const channelAddOwner = await request.post(api('channels.addOwner'))
+				.set(credentials)
+				.send({
+					roomId: publicChannel._id,
+					userId: 'rocket.cat',
+				});
+
+			request.post(api('users.delete'))
+				.set(credentials)
+				.send({
+					userId: targetUser._id,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(channelInvite1.body).to.have.property('success', true);
+					expect(channelInvite2.body).to.have.property('success', true);
+					expect(channelInviteRocketCat.body).to.have.property('success', true);
+					expect(channelAddOwner.body).to.have.property('success', true);
+					expect(res.body).to.have.property('success', true);
+					targetUser = null;
+				})
+				.end(done);
+		});
+
+		it('should see rocket.cat with owner role in the publicChannel', (done) => {
+			executeBeforeEach = false;
+			request.get(api('channels.roles'))
+				.set(credentials)
+				.query({
+					roomId: publicChannel._id,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					const isOwner = { owner: false };
+					if (res.body.roles.findIndex((u) => u.u._id === 'rocket.cat') >= 0) {
+						if (res.body.roles.find((u) => u.u._id === 'rocket.cat').roles.findIndex((r) => r === 'owner') >= 0) {
+							isOwner.owner = true;
+						}
+					}
+					expect(res.body).to.have.property('success', true);
+					expect(isOwner).to.have.nested.property('owner', true);
+				})
+				.end(done);
+		});
+
+		it('should delete user account and his private channel when user is the last owner of at least one private channel and is alone', async(done) => {
+			const groupInvite = await request.post(api('groups.invite'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+					userId: targetUser._id,
+				});
+
+			const groupAddOwner = await request.post(api('groups.addOwner'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+					userId: targetUser._id,
+				});
+
+			const deleteGroup = await request.post(api('groups.delete'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+				});
+
+			request.post(api('users.delete'))
+				.set(credentials)
+				.send({
+					userId: targetUser._id,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(groupInvite.body).to.have.property('success', true);
+					expect(groupAddOwner.body).to.have.property('success', true);
+					expect(deleteGroup.body).to.have.property('success', true);
+					expect(res.body).to.have.property('success', true);
+					targetUser = null;
+				})
+				.end(done);
+		});
+
+		it('create new private channel: privateChannel', (done) => {
+			executeBeforeEach = false;
+			request.post(api('groups.create'))
+				.set(credentials)
+				.send({
+					name: `testPrivateChannel${ +new Date() }`,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(res.body).to.have.property('success', true);
+				})
+				.end((err, res) => {
+					privateChannel = res.body.group;
+					done();
+				});
+		});
+
+		it('should delete user account and set rocket.cat user to the new owner in the private channel when user is the last owner of at least one private channel and is not alone', async(done) => {
+			const groupInvite1 = await request.post(api('groups.invite'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+					userId: targetUser._id,
+				});
+
+			const groupInvite2 = await request.post(api('groups.invite'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+					userId: user2._id,
+				});
+
+			const groupInviteRocketCat = await request.post(api('groups.invite'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+					userId: 'rocket.cat',
+				});
+
+			const groupAddOwner = await request.post(api('groups.addOwner'))
+				.set(credentials)
+				.send({
+					roomId: privateChannel._id,
+					userId: 'rocket.cat',
+				});
+
+			request.post(api('users.delete'))
+				.set(credentials)
+				.send({
+					userId: targetUser._id,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					expect(groupInvite1.body).to.have.property('success', true);
+					expect(groupInvite2.body).to.have.property('success', true);
+					expect(groupInviteRocketCat.body).to.have.property('success', true);
+					expect(groupAddOwner.body).to.have.property('success', true);
+					expect(res.body).to.have.property('success', true);
+					targetUser = null;
+				})
+				.end(done);
+		});
+
+		it('should see rocket.cat with owner role in the privateChannel', (done) => {
+			executeBeforeEach = false;
+			request.get(api('groups.roles'))
+				.set(credentials)
+				.query({
+					roomId: privateChannel._id,
+				})
+				.expect('Content-Type', 'application/json')
+				.expect(200)
+				.expect((res) => {
+					const isOwner = { owner: false };
+					if (res.body.roles.findIndex((u) => u.u._id === 'rocket.cat') >= 0) {
+						if (res.body.roles.find((u) => u.u._id === 'rocket.cat').roles.findIndex((r) => r === 'owner') >= 0) {
+							isOwner.owner = true;
+						}
+					}
+					expect(res.body).to.have.property('success', true);
+					expect(isOwner).to.have.nested.property('owner', true);
+				})
+				.end(done);
 		});
 	});
 
