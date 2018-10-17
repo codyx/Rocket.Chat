@@ -45,6 +45,30 @@ RocketChat.settings.addGroup('RetentionPolicy', function() {
 			i18nLabel: 'RetentionPolicy_AppliesToChannels',
 			enableQuery: globalQuery,
 		});
+
+
+		// SG
+		this.add('RetentionPolicy_Enable_Users_Inactivity', false, {
+			type: 'boolean',
+			public: true,
+			i18nLabel: 'Enable automatic user deletion on inactivity',
+			enableQuery: globalQuery,
+		});
+
+
+		this.add('RetentionPolicy_MaxAge_Users_Inactivity', 730, {
+			type: 'int',
+			public: true,
+			i18nLabel: 'Maximum age in days before user deletion on user inactivity',
+			i18nDescription: 'RetentionPolicy_MaxAge_Users_Inactivity_Description',
+			enableQuery: [{
+				_id: 'RetentionPolicy_Enable_Users_Inactivity',
+				value: true,
+			}, globalQuery],
+		});
+
+		// !SG
+
 		this.add('RetentionPolicy_MaxAge_Channels', 30, {
 			type: 'int',
 			public: true,
