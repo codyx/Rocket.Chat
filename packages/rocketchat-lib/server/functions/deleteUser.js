@@ -1,11 +1,15 @@
 function setNewLastOwner(userId, roomData) {
 	const rocketCat = RocketChat.models.Users.findOneById('rocket.cat');
 	if (rocketCat != null) {
-		if (!RocketChat.models.Subscriptions.findOneByRoomIdAndUserId(roomData.rid, rocketCat._id)) {
-			Meteor.call('addUserToRoom', { rid: roomData.rid, username: rocketCat.username });
+		let subscription = RocketChat.models.Subscriptions.findOneByRoomIdAndUserId(roomData.rid, rocketCat._id);
+		if (!subscription) {
+			const room = RocketChat.models.Rooms.findOneByIdOrName(roomData.rid);
+			RocketChat.models.Subscriptions.createWithRoomAndUser(room, rocketCat);
+			subscription = RocketChat.models.Subscriptions.findOneByRoomIdAndUserId(roomData.rid, rocketCat._id);
 		}
-		Meteor.call('addRoomOwner', roomData.rid, rocketCat._id);
-		Meteor.call('removeRoomOwner', roomData.rid, userId);
+		RocketChat.models.Subscriptions.addRoleById(subscription._id, 'owner');
+		const subscriptionUser = RocketChat.models.Subscriptions.findOneByRoomIdAndUserId(roomData.rid, userId);
+		RocketChat.models.Subscriptions.removeRoleById(subscriptionUser._id, 'owner');
 	}
 }
 
@@ -33,29 +37,31 @@ RocketChat.deleteUser = function(userId) {
 					const numOwners = RocketChat.authz.getUsersInRole('owner', subscription.rid).fetch().length;
 					// If it's only one, then this user is the only owner.
 					if (numOwners === 1) {
-						roomData.subscribers = RocketChat.models.Subscriptions.findByRoomId(subscription.rid).count();
-						// if ((roomData.t === 'c' || roomData.t === 'p') && roomData.subscribers === 1) {
-						if ((roomData.t === 'c' || roomData.t === 'p')) {
-							// SG: TODO: only call the following func if setting is enabled.
-							setNewLastOwner(userId, roomData);
+						// If 'RetentionPolicy_Enable_Users_Inactivity' setting is enabled
+						if (RocketChat.settings.get('RetentionPolicy_Enable_Users_Inactivity')) {
+							// Let's check how many subscribers there are in the room.
+							roomData.subscribers = RocketChat.models.Subscriptions.findByRoomId(subscription.rid).count();
+							// Only call the following func if room has more one subscriber.
+							if (roomData.subscribers > 1) {
+								setNewLastOwner(userId, roomData);
+							}
+						} else {
+							// If the user is the last owner of a public channel, then we need to abort the deletion
+							if (roomData.t === 'c') {
+								throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
+									method: 'deleteUser',
+								});
+							}
+
+							// For private groups, let's check how many subscribers it has. If the user is the only subscriber, then it will be eliminated and doesn't need to abort the deletion
+							roomData.subscribers = RocketChat.models.Subscriptions.findByRoomId(subscription.rid).count();
+
+							if (roomData.subscribers > 1) {
+								throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
+									method: 'deleteUser',
+								});
+							}
 						}
-
-						// SG: TODO: bypass if setting is enabled.
-						// // If the user is the last owner of a public channel, then we need to abort the deletion
-						// if (roomData.t === 'c') {
-						// 	throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
-						// 		method: 'deleteUser',
-						// 	});
-						// }
-
-						// For private groups, let's check how many subscribers it has. If the user is the only subscriber, then it will be eliminated and doesn't need to abort the deletion
-
-
-						// if (roomData.subscribers > 1) {
-						// 	throw new Meteor.Error('error-user-is-last-owner', `To delete this user you'll need to set a new owner to the following room: ${ subscription.name }.`, {
-						// 		method: 'deleteUser',
-						// 	});
-						// }
 					}
 				}
 			}
