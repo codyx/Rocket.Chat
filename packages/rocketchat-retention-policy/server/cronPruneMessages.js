@@ -47,7 +47,7 @@ function job() {
 	});
 
 	if (userDeletion) {
-		const maxAge = maxTimes.u || 0;
+		const maxAge = maxTimes.u || 730;
 		const lastLoginAllowed = new Date(now.getTime() - maxAge * toDays);
 
 		RocketChat.models.Users.find({
